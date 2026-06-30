@@ -473,7 +473,7 @@ button:active{opacity:.7}
           <option value="assigner">Pode atribuir tarefas</option>
           <option value="admin">Admin — acesso total</option>
         </select>
-        <div style="font-size:12px;color:var(--text3)">Projetos que esse usuário pode ver</div>
+        <div style="font-size:12px;color:var(--text3)">Projetos que esse usuário pode ver <span style="font-style:italic">(não se aplica a Admin, que já vê tudo automaticamente)</span></div>
         <div id="new-uprojects" class="proj-check-list"></div>
         <button class="btn-primary" onclick="createUser()">Criar usuário</button>
         <div class="err" id="new-user-err"></div>
@@ -1186,10 +1186,10 @@ function showConfirmation(raw){
         </div>
         <div>
           <div class="field-lbl">Data de início (opcional)</div>
-          <input type="date" id="cf-start">
+          <input type="date" id="cf-start" value="${todayStr()}">
           <div class="field-hint">Antes dessa data, a tarefa fica em "Programadas"</div>
         </div>
-        <div id="cf-nodate-warn" class="nodate-warn ${a.data?'hidden':''}">
+        <div id="cf-nodate-warn" class="nodate-warn hidden">
           ⚠️ Sem prazo nem data de início — essa tarefa vai para "Programadas". Se foi sem querer, preencha um prazo acima.
         </div>
         <div>
@@ -1384,7 +1384,7 @@ function populateManualForm(){
   document.getElementById('manual-text').value='';
   document.getElementById('manual-date').value='';
   document.getElementById('manual-time').value='';
-  document.getElementById('manual-start').value='';
+  document.getElementById('manual-start').value=todayStr();
   document.getElementById('manual-status').value='todo';
   document.getElementById('manual-recurrence').value='none';
   document.getElementById('manual-interval').value=3;
@@ -1950,7 +1950,7 @@ async function renderAdmin(){
             <option value="assigner" ${u.role==='assigner'?'selected':''}>Pode atribuir</option>
             <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
           </select>
-          <div style="font-size:12px;color:var(--text3)">Projetos que esse usuário pode ver</div>
+          <div style="font-size:12px;color:var(--text3)">Projetos que esse usuário pode ver <span style="font-style:italic">(não se aplica a Admin, que já vê tudo automaticamente)</span></div>
           <div class="proj-check-list">
             ${PROJECTS.filter(p=>p.id!=='none').map(p=>`<label class="proj-check-item"><input type="checkbox" value="${p.id}" ${pids.includes(p.id)?'checked':''} class="uproj-${u.id}"><div class="proj-check-dot" style="background:${p.color}"></div>${p.name}</label>`).join('')||'<div style="font-size:12px;color:var(--text3)">Nenhum projeto criado ainda</div>'}
           </div>

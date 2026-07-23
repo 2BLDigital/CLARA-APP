@@ -258,6 +258,8 @@ button:active{opacity:.7}
     <button class="tab" onclick="showTab('day')">Dia</button>
     <button class="tab" onclick="showTab('week')">Semana</button>
     <button class="tab" onclick="showTab('month')">Mês</button>
+    <button class="tab" onclick="showTab('recurring')">🔄 Recorrentes</button>
+    <button class="tab" onclick="showTab('backlog')">📦 Backlog</button>
     <button class="tab" onclick="showTab('whatsapp')">WhatsApp</button>
     <button class="tab" id="tab-admin-btn" onclick="showTab('admin')">Admin</button>
   </div>
@@ -419,6 +421,18 @@ button:active{opacity:.7}
     <div id="cal-detail" class="hidden"></div>
   </div>
 
+  <div id="tab-recurring" class="hidden">
+    <div class="sec-lbl">🔄 Tarefas recorrentes</div>
+    <div style="font-size:13px;color:var(--text3);margin-bottom:1rem">Aqui ficam todas as tarefas que se repetem. Elas aparecem automaticamente em "Para fazer" 3 dias antes de cada execução.</div>
+    <div id="recurring-list"></div>
+  </div>
+
+  <div id="tab-backlog" class="hidden">
+    <div class="sec-lbl">📦 Backlog</div>
+    <div style="font-size:13px;color:var(--text3);margin-bottom:1rem">Tarefas sem data definida — ideias e pendências para quando houver tempo. Adicione um prazo para ativar na lista principal.</div>
+    <div id="backlog-list"></div>
+  </div>
+
   <div id="tab-whatsapp" class="hidden">
     <div class="wa-section">
       <div class="wa-section-title">📅 Resumo do dia — individual</div>
@@ -505,6 +519,18 @@ button:active{opacity:.7}
       <button class="btn-gcal" id="gcal-connect-btn" onclick="connectGoogleCalendar()">📅 Conectar Google Agenda</button>
       <div id="gcal-status"></div>
     </div>
+    <div class="sec-lbl">Limpeza da Google Agenda</div>
+    <div class="admin-card">
+      <div style="font-size:13px;color:var(--text2);margin-bottom:12px">Se houver eventos duplicados na sua agenda, siga esse passo a passo para limpar:</div>
+      <div style="display:flex;flex-direction:column;gap:10px;font-size:13px;color:var(--text2)">
+        <div><strong>1.</strong> Abra o Google Agenda no computador (calendar.google.com)</div>
+        <div><strong>2.</strong> Mude a visualização para <strong>"Agenda"</strong> (lista) no canto superior direito</div>
+        <div><strong>3.</strong> Para cada grupo de eventos duplicados da Clara, clique no evento → lixeira 🗑️</div>
+        <div><strong>4.</strong> Se aparecer a opção <strong>"Excluir todos os eventos"</strong>, clique nela — remove todas as ocorrências de uma vez</div>
+        <div><strong>5.</strong> Depois de limpar, volte aqui e clique em <strong>"Reconectar Google Agenda"</strong> — a Clara vai sincronizar apenas o necessário, sem duplicar</div>
+      </div>
+      <div style="margin-top:12px;font-size:12px;color:var(--text3)">💡 Dica: a Clara agora não sincroniza tarefas recorrentes futuras com a agenda — só as que estão prestes a acontecer (3 dias antes). Isso evita poluir a agenda.</div>
+    </div>
   </div>
 </div>
 
@@ -552,15 +578,24 @@ function dateStr(d){return d.toISOString().split('T')[0];}
 function fmtDate(s){if(!s)return'';const[y,m,d]=s.split('-');return`${d}/${m}/${y}`;}
 function daysLate(s){if(!s)return 0;const diff=new Date(todayStr())-new Date(s);return Math.floor(diff/86400000);}
 function isLate(t){return!t.done&&t.date&&t.date<todayStr();}
-const RECURRENCE_PREVIEW_DAYS = 3; // recorrentes aparecem X dias antes da execução
+const RECURRENCE_PREVIEW_DAYS = 3;
+
+function isBacklog(t){
+  // Pure backlog: no date, no start_date, not a recurring template
+  if(t.done)return false;
+  if(t.recurrence&&t.recurrence!=='none'&&!t.parent_id)return false; // recurring templates go to Recorrentes
+  return !t.start_date&&!t.date;
+}
 
 function isScheduled(t){
   if(t.done)return false;
   const today=todayStr();
+  // Recurring templates go to Recorrentes tab
+  if(t.recurrence&&t.recurrence!=='none'&&!t.parent_id) return true;
+  // Pure backlog (no dates) goes to Backlog tab — handled separately
+  if(!t.start_date && !t.date) return true;
   // Explicit start_date in the future → programada
   if(t.start_date && t.start_date>today) return true;
-  // No date at all → backlog
-  if(!t.start_date && !t.date) return true;
   // Generated recurring task → hide if due date is more than RECURRENCE_PREVIEW_DAYS away
   if(t.is_generated && t.date){
     const daysUntil=Math.floor((new Date(t.date)-new Date(today))/86400000);
@@ -807,14 +842,14 @@ function myProjects(){
 }
 
 function showTab(name){
-  ['tasks','day','week','month','whatsapp','admin','profile'].forEach(t=>{
+  ['tasks','day','week','month','recurring','backlog','whatsapp','admin','profile'].forEach(t=>{
     const el=document.getElementById('tab-'+t);
     if(el) el.classList.add('hidden');
   });
   document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
   const el=document.getElementById('tab-'+name);
   if(el) el.classList.remove('hidden');
-  const tabs=['tasks','day','week','month','whatsapp','admin','profile'];
+  const tabs=['tasks','day','week','month','recurring','backlog','whatsapp','admin','profile'];
   const idx=tabs.indexOf(name);
   if(idx>=0) document.querySelectorAll('.tab')[idx]?.classList.add('active');
   if(name==='month')renderCalendar();
@@ -824,6 +859,8 @@ function showTab(name){
   if(name==='admin')renderAdmin();
   if(name==='profile')renderProfile();
   if(name==='tasks')renderProjectFilters();
+  if(name==='recurring')renderRecurring();
+  if(name==='backlog')renderBacklog();
 }
 
 function renderProjectFilters(){
@@ -1539,6 +1576,32 @@ async function toggleDone(id){
   }catch(e){console.error(e);}
 }
 
+async function addToCalendar(id){
+  const t=TASKS.find(t=>t.id===id);
+  if(!t||!gAccessToken)return;
+  try{
+    await syncToGoogleCalendar(t,'create');
+    renderAll();
+    const calUrl=t.date
+      ?`https://calendar.google.com/calendar/r/week/${t.date.split('-')[0]}/${t.date.split('-')[1]}/${t.date.split('-')[2]}`
+      :'https://calendar.google.com/calendar/r/week';
+    window.open(calUrl,'_blank');
+  }catch(e){console.error(e);alert('Erro ao adicionar à agenda.');}
+}
+
+async function removeFromCalendar(id){
+  const t=TASKS.find(t=>t.id===id);
+  if(!t||!gAccessToken)return;
+  if(!confirm('Remover essa tarefa da Google Agenda?'))return;
+  try{
+    if(t.gcal_event_id) await gcalDeleteEvent(t.gcal_event_id);
+    if(t.gcal_event_id_start) await gcalDeleteEvent(t.gcal_event_id_start);
+    await db.updateTask(id,{gcal_event_id:'',gcal_event_id_start:''});
+    t.gcal_event_id='';t.gcal_event_id_start='';
+    renderAll();
+  }catch(e){console.error(e);alert('Erro ao remover da agenda.');}
+}
+
 async function deleteTask(id){
   const t=TASKS.find(t=>t.id===id);
   if(!t)return;
@@ -1757,6 +1820,8 @@ function renderTaskCard(t){
       <span class="task-txt">${t.text}</span>
       <div class="task-actions">
         <button class="icon-btn" onclick="showEditTask('${t.id}')" title="Editar">✏️</button>
+        ${gAccessToken&&t.date&&!t.gcal_event_id?`<button class="icon-btn" onclick="addToCalendar('${t.id}')" title="Adicionar à agenda">📅+</button>`:''}
+        ${t.gcal_event_id&&gAccessToken?`<button class="icon-btn" onclick="removeFromCalendar('${t.id}')" title="Remover da agenda">📅✕</button>`:''}
         <button class="icon-btn" onclick="deleteTask('${t.id}')" title="Apagar">🗑</button>
       </div>
     </div>
@@ -1768,18 +1833,18 @@ function renderTaskCard(t){
 function renderTaskList(){
   const all=filterTasks(myTasks()),today=todayStr();
   const late=all.filter(t=>isLate(t));
-  const scheduled=all.filter(t=>isScheduled(t));
-  // Late tasks go to the top of "Para fazer" (they're already red)
-  const todo=[...late,...all.filter(t=>!t.done&&!isScheduled(t)&&(t.status||'todo')==='todo'&&!isLate(t))];
-  const waiting=all.filter(t=>!t.done&&!isScheduled(t)&&t.status==='waiting');
+  // Programadas: scheduled but NOT pure backlog and NOT recurring templates
+  const scheduled=all.filter(t=>isScheduled(t)&&!isBacklog(t)&&!(t.recurrence&&t.recurrence!=='none'&&!t.parent_id));
+  const todo=[...late,...all.filter(t=>!t.done&&!isScheduled(t)&&!isBacklog(t)&&(t.status||'todo')==='todo'&&!isLate(t))];
+  const waiting=all.filter(t=>!t.done&&!isScheduled(t)&&!isBacklog(t)&&t.status==='waiting');
   const done=all.filter(t=>t.done);
   document.getElementById('list-scheduled-section').style.display=scheduled.length?'':'none';
   document.getElementById('list-scheduled').innerHTML=scheduled.map(renderTaskCard).join('');
   document.getElementById('list-todo').innerHTML=todo.length?todo.map(renderTaskCard).join(''):'<div class="empty">Arraste tarefas para cá</div>';
   document.getElementById('list-waiting').innerHTML=waiting.length?waiting.map(renderTaskCard).join(''):'<div class="empty">Nenhuma</div>';
   document.getElementById('list-done').innerHTML=done.length?done.map(renderTaskCard).join(''):'<div class="empty">Nenhuma ainda</div>';
-  document.getElementById('st-pend').textContent=all.filter(t=>!t.done&&!isScheduled(t)).length;
-  document.getElementById('st-wait').textContent=all.filter(t=>!t.done&&!isScheduled(t)&&t.status==='waiting').length;
+  document.getElementById('st-pend').textContent=all.filter(t=>!t.done&&!isScheduled(t)&&!isBacklog(t)).length;
+  document.getElementById('st-wait').textContent=all.filter(t=>!t.done&&!isScheduled(t)&&!isBacklog(t)&&t.status==='waiting').length;
   document.getElementById('st-late').textContent=late.length;
   document.getElementById('st-done').textContent=all.filter(t=>t.done&&t.done_at===todayStr()).length;
 }
@@ -1858,6 +1923,60 @@ function showCalDay(dt){
   detail.classList.remove('hidden');
   detail.innerHTML=`<div class="day-modal"><div class="day-modal-hdr"><h4>📅 ${fmtDate(dt)}</h4><button class="icon-btn" onclick="selectedCalDay=null;document.getElementById('cal-detail').classList.add('hidden');renderCalendar()">✕</button></div>${tasks.map(renderTaskCard).join('')}</div>`;
   renderCalendar();
+}
+
+function renderRecurring(){
+  const templates=myTasks().filter(t=>t.recurrence&&t.recurrence!=='none'&&!t.parent_id&&!t.done);
+  const el=document.getElementById('recurring-list');
+  if(!templates.length){el.innerHTML='<div class="empty">Nenhuma tarefa recorrente criada ainda.</div>';return;}
+  const dayNames=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  el.innerHTML=templates.map(t=>{
+    const recLabel=t.recurrence==='daily'?'Todo dia':
+      t.recurrence==='weekly'?'Toda(s) '+(t.recurrence_days||[]).map(d=>dayNames[d]).join(', '):
+      t.recurrence==='monthly'?'Todo mês':
+      t.recurrence==='interval'?`A cada ${t.recurrence_interval} dias`:'';
+    // Find next upcoming generated instance
+    const children=TASKS.filter(x=>x.parent_id===t.id&&!x.done&&x.date>=todayStr()).sort((a,b)=>a.date.localeCompare(b.date));
+    const next=children[0];
+    const pBadge=projBadgeHtml(t.project_id);
+    const assignBadge=t.assigned_to&&t.assigned_to!==CU.id?`<span class="badge b-user">👤 ${userName(t.assigned_to)}</span>`:'';
+    return`<div class="task-card" id="card-${t.id}">
+      <div class="task-top">
+        <span style="font-size:20px;margin-right:8px">🔄</span>
+        <span class="task-txt">${t.text}</span>
+        <div class="task-actions">
+          <button class="icon-btn" onclick="showEditTask('${t.id}')" title="Editar">✏️</button>
+          <button class="icon-btn" onclick="deleteTask('${t.id}')" title="Apagar">🗑</button>
+        </div>
+      </div>
+      <div class="task-meta">
+        <span class="badge b-rec">${recLabel}</span>
+        ${next?`<span class="badge b-normal">📅 Próxima: ${fmtDate(next.date)}</span>`:'<span class="badge b-user">Sem próxima gerada</span>'}
+        ${assignBadge}${pBadge}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderBacklog(){
+  const tasks=myTasks().filter(t=>isBacklog(t));
+  const el=document.getElementById('backlog-list');
+  if(!tasks.length){el.innerHTML='<div class="empty">Nenhuma tarefa no backlog.<br><br>Tarefas sem prazo e sem data de início aparecem aqui.</div>';return;}
+  el.innerHTML=tasks.map(t=>{
+    const pBadge=projBadgeHtml(t.project_id);
+    const assignBadge=t.assigned_to&&t.assigned_to!==CU.id?`<span class="badge b-user">👤 ${userName(t.assigned_to)}</span>`:'';
+    return`<div class="task-card" id="card-${t.id}">
+      <div class="task-top">
+        <button class="check" onclick="toggleDone('${t.id}')"></button>
+        <span class="task-txt">${t.text}</span>
+        <div class="task-actions">
+          <button class="icon-btn" onclick="showEditTask('${t.id}')" title="Editar">✏️</button>
+          <button class="icon-btn" onclick="deleteTask('${t.id}')" title="Apagar">🗑</button>
+        </div>
+      </div>
+      <div class="task-meta">${assignBadge}${pBadge}${t.obs?`<div class="task-obs">💬 ${t.obs}</div>`:''}</div>
+    </div>`;
+  }).join('');
 }
 
 function renderWhatsapp(){
@@ -2211,10 +2330,35 @@ function initGoogleAuth(){
 async function syncAllMyTasksToGoogleCalendar(){
   if(!gAccessToken||!CU)return;
   try{
-    const mine=TASKS.filter(t=>t.assigned_to===CU.id&&t.date&&!isScheduled(t));
+    // Only sync tasks that are active (not scheduled/backlog), not future generated recurring copies
+    const mine=TASKS.filter(t=>{
+      if(t.assigned_to!==CU.id)return false;
+      if(!t.date)return false;
+      if(t.date<todayStr())return false; // never recreate past events
+      if(isScheduled(t))return false;
+      if(t.is_generated){
+        const daysUntil=Math.floor((new Date(t.date)-new Date(todayStr()))/86400000);
+        if(daysUntil>RECURRENCE_PREVIEW_DAYS)return false;
+      }
+      return true;
+    });
     for(const t of mine){
-      if(!t.gcal_event_id || (t.start_date && !t.gcal_event_id_start)){
-        await syncToGoogleCalendar(t,t.gcal_event_id?'update':'create');
+      // Check if event already exists in Google before creating to avoid duplicates
+      if(t.gcal_event_id){
+        try{
+          const r=await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${t.gcal_event_id}`,
+            {headers:{'Authorization':'Bearer '+gAccessToken}});
+          if(r.ok){
+            // Event exists, just update it
+            await syncToGoogleCalendar(t,'update');
+          }else{
+            // Event doesn't exist anymore, create fresh
+            t.gcal_event_id='';t.gcal_event_id_start='';
+            await syncToGoogleCalendar(t,'create');
+          }
+        }catch(e){ await syncToGoogleCalendar(t,'create'); }
+      }else{
+        await syncToGoogleCalendar(t,'create');
       }
     }
   }catch(e){console.error('Bulk gcal sync failed',e);}
